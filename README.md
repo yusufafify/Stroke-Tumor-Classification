@@ -32,7 +32,7 @@ Stroke-Tumor-Classification/
 ### Step 1: Clone/Download the Project
 ```bash
 git clone https://github.com/yusufafify/Stroke-Tumor-Classification.git
-cd project
+cd Stroke-Tumor-Classification
 ```
 
 ### Step 2: Install Dependencies
