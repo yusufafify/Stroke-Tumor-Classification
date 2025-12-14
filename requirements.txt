@@ -1,1 +1,9 @@
 tqdm
+numpy
+matplotlib
+pandas
+seaborn
+opencv-python
+torch
+torchvision
+pillow
