@@ -8,12 +8,13 @@ This project implements a brain MRI image classification system to identify thre
 
 ## Project Structure
 ```
-project/
+Stroke-Tumor-Classification/
 ├── READEME.md                    # This file - Main project documentation
+└── data/
+    ├── dataset_preparation.ipynb     # Step 1: Organize raw datasets
+    ├── data_preprocessing.ipynb      # Step 2: Preprocess and augment images
+    └── eda.ipynb                     # Step 3: Exploratory Data Analysis
 ├── requirements.txt              # Python dependencies
-├── dataset_preparation.ipynb     # Step 1: Organize raw datasets
-├── data_preprocessing.ipynb      # Step 2: Preprocess and augment images
-├── eda.ipynb                     # Step 3: Exploratory Data Analysis
 └── content/
     ├── README.md                 # Dataset documentation
     ├── dataset/                  # Organized dataset (after Step 1)
@@ -28,15 +29,9 @@ project/
 
 ## Setup Instructions
 
-### Prerequisites
-- Python 3.8 or higher
-- Anaconda or Miniconda (recommended)
-- Jupyter Notebook or VS Code with Jupyter extension
-- At least 5GB free disk space
-
 ### Step 1: Clone/Download the Project
 ```bash
-git clone <repository-url>
+git clone https://github.com/yusufafify/Stroke-Tumor-Classification.git
 cd project
 ```
 
@@ -60,7 +55,6 @@ You need to download two datasets from Kaggle:
 
 #### Dataset 1: Brain Tumor Classification
 - **Link**: https://www.kaggle.com/datasets/sartajbhuvaji/brain-tumor-classification-mri
-- **Size**: ~250 MB
 - **Download Instructions**:
   1. Go to the Kaggle link above
   2. Click "Download" button (requires Kaggle account)
@@ -68,7 +62,6 @@ You need to download two datasets from Kaggle:
 
 #### Dataset 2: Brain Stroke MRI Images
 - **Link**: https://www.kaggle.com/datasets/mitangshu11/brain-stroke-mri-images
-- **Size**: ~1.5 GB
 - **Download Instructions**:
   1. Go to the Kaggle link above
   2. Click "Download" button (requires Kaggle account)
