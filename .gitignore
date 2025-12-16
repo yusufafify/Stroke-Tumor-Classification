@@ -2,3 +2,6 @@
 venv
 dataset
 processed_data
+seed_images_annotated
+annotated_concepts_filled.csv
+concepts_to_annotate.csv
