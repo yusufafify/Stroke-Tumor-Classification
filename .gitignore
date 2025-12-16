@@ -2,3 +2,5 @@
 venv
 dataset
 processed_data
+Brain_Stroke_MRI
+Brain_Tumor_Classification
