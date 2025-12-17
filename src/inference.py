@@ -6,12 +6,12 @@ from torchvision import models, transforms
 from PIL import Image
 import numpy as np
 import cv2
-from typing import Dict, Tuple, Optional, Union, List
+from typing import Dict, Tuple, Optional, Union
 import warnings
 from preprocess import preprocess_mri_image
+from utils import decode_base64_image
 
 warnings.filterwarnings('ignore')
-
 
 
 class ClassificationInference:
@@ -71,19 +71,27 @@ class ClassificationInference:
         Pipeline: Load -> ROI Extraction -> CLAHE -> Resize -> ToTensor -> Normalize
         
         Args:
-            image: Input image (file path, PIL Image, or numpy array)
+            image: Input image (file path, PIL Image, numpy array, or base64 string)
             
         Returns:
             Preprocessed image tensor
         """
         # Load image and convert to OpenCV format (BGR) for preprocessing
         if isinstance(image, str):
-            if not os.path.exists(image):
+            # Check if it's a base64 string
+            if image.startswith('data:image') or len(image) > 500:  # Heuristic for base64
+                try:
+                    pil_image = decode_base64_image(image)
+                    cv_image = cv2.cvtColor(np.array(pil_image), cv2.COLOR_RGB2BGR)
+                except Exception as e:
+                    raise ValueError(f"Failed to decode base64 image: {e}")
+            elif not os.path.exists(image):
                 raise FileNotFoundError(f"Image file not found: {image}")
-            # Load as OpenCV image (BGR)
-            cv_image = cv2.imread(image)
-            if cv_image is None:
-                raise ValueError(f"Failed to load image: {image}")
+            else:
+                # Load as OpenCV image (BGR)
+                cv_image = cv2.imread(image)
+                if cv_image is None:
+                    raise ValueError(f"Failed to load image: {image}")
         
         elif isinstance(image, Image.Image):
             # Convert PIL to OpenCV (BGR)
@@ -209,21 +217,30 @@ class GradCAMInference:
     
     def preprocess_image(self, image: Union[str, Image.Image, np.ndarray]) -> Tuple[torch.Tensor, np.ndarray]:
         """
-        Preprocess image for model input and keep original for overlay.
+        Preprocess image for model input with MRI-specific preprocessing.
+        Pipeline: Load -> ROI Extraction -> CLAHE -> Resize -> ToTensor -> Normalize
         
         Args:
-            image: Input image (file path, PIL Image, or numpy array)
+            image: Input image (file path, PIL Image, numpy array, or base64 string)
             
         Returns:
             Tuple of (preprocessed tensor, original image array in RGB)
         """
         # Load and convert to OpenCV format
         if isinstance(image, str):
-            if not os.path.exists(image):
+            # Check if it's a base64 string
+            if image.startswith('data:image') or len(image) > 500:  # Heuristic for base64
+                try:
+                    pil_image = decode_base64_image(image)
+                    cv_image = cv2.cvtColor(np.array(pil_image), cv2.COLOR_RGB2BGR)
+                except Exception as e:
+                    raise ValueError(f"Failed to decode base64 image: {e}")
+            elif not os.path.exists(image):
                 raise FileNotFoundError(f"Image file not found: {image}")
-            cv_image = cv2.imread(image)
-            if cv_image is None:
-                raise ValueError(f"Failed to load image: {image}")
+            else:
+                cv_image = cv2.imread(image)
+                if cv_image is None:
+                    raise ValueError(f"Failed to load image: {image}")
         elif isinstance(image, Image.Image):
             cv_image = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
         elif isinstance(image, np.ndarray):
@@ -441,19 +458,27 @@ class SegmentationInference:
         Pipeline: Load -> ROI Extraction -> CLAHE -> Resize -> ToTensor -> Normalize
         
         Args:
-            image: Input image (file path, PIL Image, or numpy array)
+            image: Input image (file path, PIL Image, numpy array, or base64 string)
             
         Returns:
             Tuple of (preprocessed tensor, original preprocessed image array in RGB)
         """
         # Load image and convert to OpenCV format (BGR) for preprocessing
         if isinstance(image, str):
-            if not os.path.exists(image):
+            # Check if it's a base64 string
+            if image.startswith('data:image') or len(image) > 500:  # Heuristic for base64
+                try:
+                    pil_image = decode_base64_image(image)
+                    cv_image = cv2.cvtColor(np.array(pil_image), cv2.COLOR_RGB2BGR)
+                except Exception as e:
+                    raise ValueError(f"Failed to decode base64 image: {e}")
+            elif not os.path.exists(image):
                 raise FileNotFoundError(f"Image file not found: {image}")
-            # Load as OpenCV image (BGR)
-            cv_image = cv2.imread(image)
-            if cv_image is None:
-                raise ValueError(f"Failed to load image: {image}")
+            else:
+                # Load as OpenCV image (BGR)
+                cv_image = cv2.imread(image)
+                if cv_image is None:
+                    raise ValueError(f"Failed to load image: {image}")
         
         elif isinstance(image, Image.Image):
             # Convert PIL to OpenCV (BGR)
