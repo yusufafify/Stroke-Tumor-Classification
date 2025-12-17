@@ -6,12 +6,439 @@ from torchvision import models, transforms
 from PIL import Image
 import numpy as np
 import cv2
-from typing import Dict, Tuple, Optional, Union
+from typing import Dict, Tuple, Optional, Union, List
 import warnings
 from preprocess import preprocess_mri_image
 from utils import decode_base64_image
+import base64
+import io
+import open_clip
+
 
 warnings.filterwarnings('ignore')
+
+
+
+
+class LFCBMInference:
+    """
+    Inference class for Label-Free Concept Bottleneck Model.
+    
+    This class loads a pre-trained LF-CBM model and provides methods for
+    making predictions with concept-based explanations.
+    
+    Attributes:
+        device (torch.device): Device to run inference on (CPU or CUDA)
+        model: BioMedCLIP vision-language model
+        preprocess: Image preprocessing transforms
+        tokenizer: Text tokenizer for concepts
+        classifier: Trained logistic regression classifier
+        class_names (List[str]): List of class names
+        all_concepts (List[str]): List of all clinical concepts
+        text_embeddings (torch.Tensor): Pre-computed text embeddings for concepts
+    """
+    
+    def __init__(
+        self, 
+        model_path: str,
+        device: Optional[str] = None,
+        verbose: bool = True
+    ):
+        """
+        Initialize the LF-CBM inference model.
+        
+        Args:
+            model_path (str): Path to the saved .pth model file
+            device (str, optional): Device to use ('cuda', 'cpu', or None for auto)
+            verbose (bool): Whether to print loading information
+        """
+        self.verbose = verbose
+        
+        # Setup device
+        if device is None:
+            self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        else:
+            self.device = torch.device(device)
+        
+        if self.verbose:
+            print(f"Initializing LF-CBM Inference on {self.device}")
+        
+        # Load the saved model
+        self._load_model(model_path)
+        
+        # Load BioMedCLIP
+        self._load_biomedclip()
+        
+        # Compute text embeddings
+        self._compute_text_embeddings()
+        
+        if self.verbose:
+            print("✓ LF-CBM Inference ready!")
+    
+    def _load_model(self, model_path: str):
+        """Load the saved LF-CBM model and metadata."""
+        if self.verbose:
+            print(f"Loading model from {model_path}...")
+        
+        # Load model state
+        model_state = torch.load(model_path, map_location=self.device, weights_only=False)
+        
+        # Extract components
+        self.classifier = model_state['classifier']
+        self.class_names = model_state['class_names']
+        self.all_concepts = model_state['all_concepts']
+        self.concept_bank = model_state['concept_bank']
+        self.biomedclip_model_name = model_state['model_name']
+        
+        if self.verbose:
+            print(f"  Classes: {self.class_names}")
+            print(f"  Concepts: {len(self.all_concepts)}")
+            print(f"  Test Accuracy: {model_state.get('test_accuracy', 'N/A')}")
+    
+    def _load_biomedclip(self):
+        """Load BioMedCLIP model."""
+        if self.verbose:
+            print("Loading BioMedCLIP model...")
+        
+        # Load model using open_clip
+        self.model, preprocess_train, self.preprocess = open_clip.create_model_and_transforms(
+            self.biomedclip_model_name
+        )
+        self.tokenizer = open_clip.get_tokenizer(self.biomedclip_model_name)
+        
+        # Move to device and set to eval mode
+        self.model = self.model.to(self.device)
+        self.model.eval()
+        
+        if self.verbose:
+            print("✓ BioMedCLIP loaded")
+    
+    def _compute_text_embeddings(self):
+        """Pre-compute text embeddings for all concepts."""
+        if self.verbose:
+            print("Computing text embeddings...")
+        
+        # Tokenize all concepts
+        text_inputs = self.tokenizer(self.all_concepts).to(self.device)
+        
+        # Get embeddings
+        with torch.no_grad():
+            self.text_embeddings = self.model.encode_text(text_inputs)
+            self.text_embeddings = F.normalize(self.text_embeddings, dim=-1)
+        
+        if self.verbose:
+            print(f"✓ Text embeddings computed: {self.text_embeddings.shape}")
+    
+    def _load_image_from_base64(self, base64_string: str) -> Image.Image:
+        """
+        Load an image from a base64 encoded string.
+        
+        Args:
+            base64_string (str): Base64 encoded image string
+            
+        Returns:
+            PIL.Image.Image: Loaded image
+        """
+        # Remove data URL prefix if present (e.g., "data:image/jpeg;base64,")
+        if ',' in base64_string:
+            base64_string = base64_string.split(',', 1)[1]
+        
+        # Decode base64 string
+        image_data = base64.b64decode(base64_string)
+        
+        # Load image from bytes
+        image = Image.open(io.BytesIO(image_data))
+        
+        return image
+    
+    def _load_image(self, image_input: Union[str, Image.Image, np.ndarray]) -> Image.Image:
+        """
+        Load an image from various input types.
+        
+        Args:
+            image_input (Union[str, Image.Image, np.ndarray]): Can be:
+                - File path (str)
+                - Base64 encoded string (str starting with 'data:' or containing base64 data)
+                - PIL Image object
+                - Numpy array
+            
+        Returns:
+            PIL.Image.Image: Loaded image
+        """
+        if isinstance(image_input, Image.Image):
+            return image_input
+        elif isinstance(image_input, np.ndarray):
+            # Convert numpy array to PIL Image
+            # Handle different array shapes and types
+            if image_input.dtype != np.uint8:
+                # Normalize to 0-255 range if needed
+                if image_input.max() <= 1.0:
+                    image_input = (image_input * 255).astype(np.uint8)
+                else:
+                    image_input = image_input.astype(np.uint8)
+            return Image.fromarray(image_input)
+        elif isinstance(image_input, str):
+            # Check if it's a base64 string
+            if image_input.startswith('data:') or (len(image_input) > 100 and not Path(image_input).exists()):
+                return self._load_image_from_base64(image_input)
+            else:
+                # It's a file path
+                return Image.open(image_input)
+        else:
+            raise ValueError(f"Unsupported image input type: {type(image_input)}")
+    
+    def extract_concept_features(self, image_input: Union[str, Image.Image, np.ndarray]) -> np.ndarray:
+        """
+        Extract concept-based features from an image.
+        
+        Args:
+            image_input (Union[str, Image.Image, np.ndarray]): Can be:
+                - File path (str)
+                - Base64 encoded string (str)
+                - PIL Image object
+                - Numpy array
+            
+        Returns:
+            np.ndarray: Array of concept similarity scores
+        """
+        # Load and preprocess image
+        image = self._load_image(image_input).convert("RGB")
+        image_input_tensor = self.preprocess(image).unsqueeze(0).to(self.device)
+        
+        # Get image embedding
+        with torch.no_grad():
+            image_embedding = self.model.encode_image(image_input_tensor)
+            image_embedding = F.normalize(image_embedding, dim=-1)
+        
+        # Compute similarity with all concepts
+        similarities = (image_embedding @ self.text_embeddings.T).squeeze(0)
+        
+        return similarities.cpu().numpy()
+    
+    def predict(
+        self, 
+        image_input: Union[str, Image.Image, np.ndarray],
+        return_probabilities: bool = True,
+        return_features: bool = False
+    ) -> Dict:
+        """
+        Make a prediction for an image.
+        
+        Args:
+            image_input (Union[str, Image.Image, np.ndarray]): Can be:
+                - File path (str)
+                - Base64 encoded string (str)
+                - PIL Image object
+                - Numpy array
+            return_probabilities (bool): Whether to return class probabilities
+            return_features (bool): Whether to return concept features
+            
+        Returns:
+            Dict: Dictionary containing:
+                - 'predicted_class' (str): Predicted class name
+                - 'predicted_index' (int): Predicted class index (for app.py compatibility)
+                - 'probabilities' (Dict): Class probabilities (if requested)
+                - 'confidence' (float): Confidence score (max probability)
+                - 'features' (np.ndarray): Concept features (if requested)
+        """
+        # Extract concept features
+        features = self.extract_concept_features(image_input)
+        
+        # Make prediction
+        prediction_idx = self.classifier.predict(features.reshape(1, -1))[0]
+        predicted_class = self.class_names[prediction_idx]
+        
+        # Get probabilities
+        probabilities = self.classifier.predict_proba(features.reshape(1, -1))[0]
+        confidence = float(probabilities[prediction_idx])
+        
+        # Prepare result (using 'predicted_index' to match app.py expectations)
+        result = {
+            'predicted_class': predicted_class,
+            'predicted_index': int(prediction_idx),  # Changed from predicted_idx for app.py compatibility
+            'confidence': confidence
+        }
+        
+        if return_probabilities:
+            result['probabilities'] = {
+                class_name: float(prob) 
+                for class_name, prob in zip(self.class_names, probabilities)
+            }
+        
+        if return_features:
+            result['features'] = features
+        
+        return result
+    
+    def explain_prediction(
+        self, 
+        image_input: Union[str, Image.Image, np.ndarray],
+        top_k: int = 5
+    ) -> Dict:
+        """
+        Make a prediction with detailed concept-based explanation.
+        
+        Args:
+            image_input (Union[str, Image.Image, np.ndarray]): Can be:
+                - File path (str)
+                - Base64 encoded string (str)
+                - PIL Image object
+                - Numpy array
+            top_k (int): Number of top concepts to include in explanation
+            
+        Returns:
+            Dict: Dictionary containing:
+                - 'predicted_class' (str): Predicted class name
+                - 'confidence' (float): Prediction confidence
+                - 'probabilities' (Dict): All class probabilities
+                - 'top_concepts' (List[Dict]): Top activated concepts with details
+                - 'top_supporting_concepts' (List[Dict]): Top concepts supporting the prediction
+                - 'interpretation' (str): Human-readable explanation
+        """
+        # Get basic prediction
+        result = self.predict(image_input, return_probabilities=True, return_features=True)
+        features = result.pop('features')
+        predicted_idx = result['predicted_idx']
+        predicted_class = result['predicted_class']
+        
+        # Get top activated concepts
+        concept_scores = list(zip(self.all_concepts, features))
+        concept_scores.sort(key=lambda x: x[1], reverse=True)
+        
+        top_concepts = []
+        for i, (concept, score) in enumerate(concept_scores[:top_k]):
+            concept_idx = self.all_concepts.index(concept)
+            weight = self.classifier.coef_[predicted_idx, concept_idx]
+            contribution = score * weight
+            
+            top_concepts.append({
+                'concept': concept,
+                'similarity_score': float(score),
+                'weight': float(weight),
+                'contribution': float(contribution)
+            })
+        
+        # Get top supporting concepts (high score AND positive weight)
+        contributions = []
+        for i, concept in enumerate(self.all_concepts):
+            score = features[i]
+            weight = self.classifier.coef_[predicted_idx, i]
+            contrib = score * weight
+            contributions.append({
+                'concept': concept,
+                'similarity_score': float(score),
+                'weight': float(weight),
+                'contribution': float(contrib)
+            })
+        
+        contributions.sort(key=lambda x: x['contribution'], reverse=True)
+        top_supporting = [c for c in contributions[:top_k] if c['contribution'] > 0]
+        
+        # Generate interpretation
+        interpretation = f"The model predicted '{predicted_class}' with {result['confidence']:.2%} confidence. "
+        
+        if top_supporting:
+            interpretation += "Key supporting evidence includes: "
+            evidence_parts = []
+            for i, c in enumerate(top_supporting[:3], 1):
+                evidence_parts.append(
+                    f"{c['concept']} (similarity: {c['similarity_score']:.3f})"
+                )
+            interpretation += ", ".join(evidence_parts) + "."
+        
+        # Build final result
+        result['top_concepts'] = top_concepts
+        result['top_supporting_concepts'] = top_supporting
+        result['interpretation'] = interpretation
+        
+        return result
+    
+    def predict_batch(
+        self, 
+        image_paths: List[str],
+        show_progress: bool = True
+    ) -> List[Dict]:
+        """
+        Make predictions for multiple images.
+        
+        Args:
+            image_paths (List[str]): List of image file paths
+            show_progress (bool): Whether to show progress bar
+            
+        Returns:
+            List[Dict]: List of prediction results for each image
+        """
+        results = []
+        
+        iterator = image_paths
+        if show_progress:
+            try:
+                from tqdm import tqdm
+                iterator = tqdm(image_paths, desc="Processing images")
+            except ImportError:
+                pass
+        
+        for image_path in iterator:
+            try:
+                result = self.predict(image_path, return_probabilities=True)
+                result['image_path'] = image_path
+                result['status'] = 'success'
+            except Exception as e:
+                result = {
+                    'image_path': image_path,
+                    'status': 'error',
+                    'error': str(e)
+                }
+            results.append(result)
+        
+        return results
+    
+    def get_concept_importance(self) -> Dict[str, np.ndarray]:
+        """
+        Get concept importance weights for each class.
+        
+        Returns:
+            Dict[str, np.ndarray]: Dictionary mapping class names to concept weights
+        """
+        importance = {}
+        for i, class_name in enumerate(self.class_names):
+            importance[class_name] = self.classifier.coef_[i]
+        return importance
+    
+    def get_top_concepts_for_class(
+        self, 
+        class_name: str, 
+        top_k: int = 10
+    ) -> List[Tuple[str, float]]:
+        """
+        Get the most important concepts for a specific class.
+        
+        Args:
+            class_name (str): Name of the class
+            top_k (int): Number of top concepts to return
+            
+        Returns:
+            List[Tuple[str, float]]: List of (concept, weight) tuples
+        """
+        if class_name not in self.class_names:
+            raise ValueError(f"Unknown class: {class_name}")
+        
+        class_idx = self.class_names.index(class_name)
+        weights = self.classifier.coef_[class_idx]
+        
+        # Get top by absolute value
+        top_indices = np.argsort(np.abs(weights))[-top_k:][::-1]
+        
+        return [(self.all_concepts[i], weights[i]) for i in top_indices]
+    
+    def __repr__(self):
+        return (
+            f"LFCBMInference(\n"
+            f"  device={self.device},\n"
+            f"  classes={self.class_names},\n"
+            f"  n_concepts={len(self.all_concepts)}\n"
+            f")"
+        )
 
 
 class ClassificationInference:
