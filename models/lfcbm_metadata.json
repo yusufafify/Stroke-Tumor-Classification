@@ -1,0 +1,75 @@
+{
+  "concept_bank": {
+    "Tumor": [
+      "space-occupying lesion",
+      "mass effect present",
+      "irregular lesion margins",
+      "vasogenic edema pattern",
+      "central hypointensity",
+      "heterogeneous signal intensity",
+      "fingerlike edema extension",
+      "structural displacement",
+      "necrotic center"
+    ],
+    "Hemorrhagic": [
+      "dark signal on susceptibility weighted imaging",
+      "blooming artifact present",
+      "focal hypointense region",
+      "blood products signal intensity",
+      "susceptibility artifact",
+      "well-circumscribed hemorrhagic lesion",
+      "acute bleeding pattern",
+      "hypointense on SWI"
+    ],
+    "Ischemic": [
+      "bright signal on diffusion weighted imaging",
+      "territorial distribution pattern",
+      "vascular territory involvement",
+      "diffusion restriction present",
+      "wedge-shaped lesion",
+      "cortical gray matter involvement",
+      "hypointense region on apparent diffusion coefficient",
+      "acute infarct pattern"
+    ]
+  },
+  "all_concepts": [
+    "space-occupying lesion",
+    "mass effect present",
+    "irregular lesion margins",
+    "vasogenic edema pattern",
+    "central hypointensity",
+    "heterogeneous signal intensity",
+    "fingerlike edema extension",
+    "structural displacement",
+    "necrotic center",
+    "dark signal on susceptibility weighted imaging",
+    "blooming artifact present",
+    "focal hypointense region",
+    "blood products signal intensity",
+    "susceptibility artifact",
+    "well-circumscribed hemorrhagic lesion",
+    "acute bleeding pattern",
+    "hypointense on SWI",
+    "bright signal on diffusion weighted imaging",
+    "territorial distribution pattern",
+    "vascular territory involvement",
+    "diffusion restriction present",
+    "wedge-shaped lesion",
+    "cortical gray matter involvement",
+    "hypointense region on apparent diffusion coefficient",
+    "acute infarct pattern"
+  ],
+  "class_names": [
+    "Hemorrhagic",
+    "Ischemic",
+    "Tumor"
+  ],
+  "class_to_idx": {
+    "Hemorrhagic": 0,
+    "Ischemic": 1,
+    "Tumor": 2
+  },
+  "model_name": "hf-hub:microsoft/BiomedCLIP-PubMedBERT_256-vit_base_patch16_224",
+  "test_accuracy": 0.9047619047619048,
+  "train_accuracy": 0.9233870967741935
+}
