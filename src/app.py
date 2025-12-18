@@ -17,7 +17,7 @@ from flask_cors import CORS
 import numpy as np
 from PIL import Image
 
-from inference import ClassificationInference, SegmentationInference, GradCAMInference, LFCBMInference
+from inference import ClassificationInference, SegmentationInference, GradCAMInference, LFCBMInference, ResUNetSegmentationInference
 # from lfcbm_inference import LFCBMInference
 
 app = Flask(__name__)
@@ -27,7 +27,7 @@ CORS(app)  # Enable CORS for frontend integration
 MODELS_DIR = os.path.join(os.path.dirname(__file__), '..', 'models')
 CLASSIFICATION_MODEL_PATH = os.path.join(MODELS_DIR, 'lfcbm_model.pth') 
 RESNET_MODEL_PATH = os.path.join(MODELS_DIR, 'classification_model.pth')
-SEGMENTATION_MODEL_PATH = os.path.join(MODELS_DIR, 'segmentation_model.pth')
+SEGMENTATION_MODEL_PATH = os.path.join(MODELS_DIR, 'resunet_segmentation_model.pth')  # ResUNet model
 
 # Global model instances (lazy loading)
 _classification_model = None
@@ -51,9 +51,9 @@ def get_segmentation_model():
     """Lazy load segmentation model."""
     global _segmentation_model
     if _segmentation_model is None:
-        print("Loading segmentation model...")
-        _segmentation_model = SegmentationInference(SEGMENTATION_MODEL_PATH)
-        print("Segmentation model loaded successfully!")
+        print("Loading ResUNet segmentation model...")
+        _segmentation_model = ResUNetSegmentationInference(SEGMENTATION_MODEL_PATH)
+        print("ResUNet segmentation model loaded successfully!")
     return _segmentation_model
 
 
@@ -387,7 +387,7 @@ if __name__ == '__main__':
     print("=" * 60)
     print(f"Classification Model (LF-CBM): {CLASSIFICATION_MODEL_PATH}")
     print(f"ResNet Model (for GradCAM): {RESNET_MODEL_PATH}")
-    print(f"Segmentation Model: {SEGMENTATION_MODEL_PATH}")
+    print(f"Segmentation Model (ResUNet): {SEGMENTATION_MODEL_PATH}")
     print("=" * 60)
     
     # Run the Flask app
