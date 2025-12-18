@@ -1011,3 +1011,309 @@ class SegmentationInference:
         overlay = cv2.addWeighted(original_image, 1 - alpha, colored_mask, alpha, 0)
         
         return overlay
+
+
+# ============================================================================
+# ResUNet Architecture for Advanced Segmentation
+# ============================================================================
+
+class ResidualBlock(nn.Module):
+    """Residual block with skip connection for ResUNet"""
+    def __init__(self, in_channels, out_channels, stride=1):
+        super(ResidualBlock, self).__init__()
+        
+        self.conv1 = nn.Conv2d(in_channels, out_channels, kernel_size=3, 
+                               stride=stride, padding=1, bias=False)
+        self.bn1 = nn.BatchNorm2d(out_channels)
+        self.relu = nn.ReLU(inplace=True)
+        
+        self.conv2 = nn.Conv2d(out_channels, out_channels, kernel_size=3,
+                               stride=1, padding=1, bias=False)
+        self.bn2 = nn.BatchNorm2d(out_channels)
+        
+        # Skip connection - adjust dimensions if needed
+        self.skip = nn.Sequential()
+        if stride != 1 or in_channels != out_channels:
+            self.skip = nn.Sequential(
+                nn.Conv2d(in_channels, out_channels, kernel_size=1, 
+                         stride=stride, bias=False),
+                nn.BatchNorm2d(out_channels)
+            )
+    
+    def forward(self, x):
+        identity = self.skip(x)
+        
+        out = self.conv1(x)
+        out = self.bn1(out)
+        out = self.relu(out)
+        
+        out = self.conv2(out)
+        out = self.bn2(out)
+        
+        out += identity  # Residual connection
+        out = self.relu(out)
+        
+        return out
+
+
+class ResUNet(nn.Module):
+    """Residual U-Net for medical image segmentation"""
+    def __init__(self, in_channels=3, out_channels=1):
+        super(ResUNet, self).__init__()
+        
+        # Initial convolution
+        self.input_layer = nn.Sequential(
+            nn.Conv2d(in_channels, 64, kernel_size=3, padding=1),
+            nn.BatchNorm2d(64),
+            nn.ReLU(inplace=True)
+        )
+        
+        # Encoder (Downsampling path)
+        self.encoder1 = ResidualBlock(64, 64)
+        self.pool1 = nn.MaxPool2d(2)
+        
+        self.encoder2 = ResidualBlock(64, 128)
+        self.pool2 = nn.MaxPool2d(2)
+        
+        self.encoder3 = ResidualBlock(128, 256)
+        self.pool3 = nn.MaxPool2d(2)
+        
+        self.encoder4 = ResidualBlock(256, 512)
+        self.pool4 = nn.MaxPool2d(2)
+        
+        # Bridge (Bottleneck)
+        self.bridge = ResidualBlock(512, 1024)
+        
+        # Decoder (Upsampling path)
+        self.upconv4 = nn.ConvTranspose2d(1024, 512, kernel_size=2, stride=2)
+        self.decoder4 = ResidualBlock(1024, 512)  # 1024 = 512 (upconv) + 512 (skip)
+        
+        self.upconv3 = nn.ConvTranspose2d(512, 256, kernel_size=2, stride=2)
+        self.decoder3 = ResidualBlock(512, 256)  # 512 = 256 + 256
+        
+        self.upconv2 = nn.ConvTranspose2d(256, 128, kernel_size=2, stride=2)
+        self.decoder2 = ResidualBlock(256, 128)  # 256 = 128 + 128
+        
+        self.upconv1 = nn.ConvTranspose2d(128, 64, kernel_size=2, stride=2)
+        self.decoder1 = ResidualBlock(128, 64)  # 128 = 64 + 64
+        
+        # Output layer
+        self.output_layer = nn.Conv2d(64, out_channels, kernel_size=1)
+    
+    def forward(self, x):
+        # Encoder
+        x = self.input_layer(x)
+        
+        enc1 = self.encoder1(x)
+        x = self.pool1(enc1)
+        
+        enc2 = self.encoder2(x)
+        x = self.pool2(enc2)
+        
+        enc3 = self.encoder3(x)
+        x = self.pool3(enc3)
+        
+        enc4 = self.encoder4(x)
+        x = self.pool4(enc4)
+        
+        # Bridge
+        x = self.bridge(x)
+        
+        # Decoder with skip connections
+        x = self.upconv4(x)
+        x = torch.cat([x, enc4], dim=1)  # Skip connection
+        x = self.decoder4(x)
+        
+        x = self.upconv3(x)
+        x = torch.cat([x, enc3], dim=1)
+        x = self.decoder3(x)
+        
+        x = self.upconv2(x)
+        x = torch.cat([x, enc2], dim=1)
+        x = self.decoder2(x)
+        
+        x = self.upconv1(x)
+        x = torch.cat([x, enc1], dim=1)
+        x = self.decoder1(x)
+        
+        # Output
+        x = self.output_layer(x)
+        return torch.sigmoid(x)
+
+
+class ResUNetSegmentationInference:
+    """
+    Inference class for brain lesion segmentation using ResUNet.
+    Provides advanced segmentation with residual connections for better feature extraction.
+    """
+    
+    def __init__(self, model_path: str, device: Optional[str] = None):
+        """
+        Initialize the ResUNet segmentation model.
+        
+        Args:
+            model_path: Path to the trained ResUNet model (.pth file)
+            device: Device to run inference on ('cuda', 'cpu', or None for auto-detect)
+        """
+        self.device = self._get_device(device)
+        self.model = self._load_model(model_path)
+        self.transform = self._get_transform()
+        
+    def _get_device(self, device: Optional[str]) -> torch.device:
+        """Determine the device to use for inference."""
+        if device:
+            return torch.device(device)
+        return torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    
+    def _load_model(self, model_path: str) -> nn.Module:
+        """Load the trained ResUNet model."""
+        if not os.path.exists(model_path):
+            raise FileNotFoundError(f"Model file not found: {model_path}")
+        
+        # Initialize ResUNet architecture
+        model = ResUNet()
+        
+        # Load trained weights
+        model.load_state_dict(torch.load(model_path, map_location=self.device))
+        model = model.to(self.device)
+        model.eval()
+        
+        return model
+    
+    def _get_transform(self) -> transforms.Compose:
+        """Get the image transformation pipeline."""
+        return transforms.Compose([
+            transforms.Resize((224, 224)),
+            transforms.ToTensor(),
+            transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+        ])
+    
+    def preprocess_image(self, image: Union[str, Image.Image, np.ndarray]) -> Tuple[torch.Tensor, np.ndarray]:
+        """
+        Preprocess image for model input with MRI-specific preprocessing.
+        Pipeline: Load -> ROI Extraction -> CLAHE -> Resize -> ToTensor -> Normalize
+        
+        Args:
+            image: Input image (file path, PIL Image, numpy array, or base64 string)
+            
+        Returns:
+            Tuple of (preprocessed tensor, original preprocessed image array in RGB)
+        """
+        # Load image and convert to OpenCV format (BGR) for preprocessing
+        if isinstance(image, str):
+            # Check if it's a base64 string
+            if image.startswith('data:image') or len(image) > 500:
+                try:
+                    pil_image = decode_base64_image(image)
+                    cv_image = cv2.cvtColor(np.array(pil_image), cv2.COLOR_RGB2BGR)
+                except Exception as e:
+                    raise ValueError(f"Failed to decode base64 image: {e}")
+            elif not os.path.exists(image):
+                raise FileNotFoundError(f"Image file not found: {image}")
+            else:
+                cv_image = cv2.imread(image)
+                if cv_image is None:
+                    raise ValueError(f"Failed to load image: {image}")
+        
+        elif isinstance(image, Image.Image):
+            cv_image = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
+        
+        elif isinstance(image, np.ndarray):
+            cv_image = image if len(image.shape) == 3 else cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
+        
+        else:
+            raise TypeError(f"Unsupported image type: {type(image)}")
+        
+        # Apply MRI preprocessing: ROI extraction + CLAHE normalization
+        preprocessed_cv = preprocess_mri_image(cv_image)
+        
+        # Convert to RGB for consistency
+        preprocessed_rgb = cv2.cvtColor(preprocessed_cv, cv2.COLOR_BGR2RGB)
+        original_array = preprocessed_rgb.copy()
+        
+        # Convert to PIL for PyTorch transforms
+        pil_image = Image.fromarray(preprocessed_rgb)
+        
+        # Apply PyTorch transformations
+        image_tensor = self.transform(pil_image)
+        return image_tensor.unsqueeze(0), original_array
+    
+    def predict(self, image: Union[str, Image.Image, np.ndarray], 
+                threshold: float = 0.5, 
+                return_overlay: bool = False) -> Dict:
+        """
+        Perform segmentation on a single image using ResUNet.
+        
+        Args:
+            image: Input image (file path, PIL Image, or numpy array)
+            threshold: Threshold for binary mask (0-1)
+            return_overlay: Whether to return overlay visualization
+            
+        Returns:
+            Dictionary containing:
+                - mask: Binary segmentation mask (numpy array)
+                - probability_map: Raw probability map (numpy array)
+                - lesion_area_ratio: Ratio of lesion area to total brain area
+                - overlay: (Optional) RGB overlay visualization
+        """
+        # Preprocess image
+        input_tensor, original_array = self.preprocess_image(image)
+        input_tensor = input_tensor.to(self.device)
+        
+        # Perform inference
+        with torch.no_grad():
+            output = self.model(input_tensor)
+            probability_map = output.cpu().squeeze().numpy()
+        
+        # Create binary mask
+        binary_mask = (probability_map > threshold).astype(np.uint8)
+        
+        # Resize masks to original image size
+        original_size = (original_array.shape[1], original_array.shape[0])
+        probability_map_resized = cv2.resize(probability_map, original_size)
+        binary_mask_resized = cv2.resize(binary_mask, original_size, interpolation=cv2.INTER_NEAREST)
+        
+        # Calculate lesion area ratio
+        total_pixels = binary_mask_resized.size
+        lesion_pixels = np.sum(binary_mask_resized)
+        lesion_area_ratio = lesion_pixels / total_pixels
+        
+        # Prepare result
+        result = {
+            'mask': binary_mask_resized,
+            'probability_map': probability_map_resized,
+            'lesion_area_ratio': float(lesion_area_ratio),
+            'lesion_pixels': int(lesion_pixels),
+            'total_pixels': int(total_pixels)
+        }
+        
+        # Create overlay if requested
+        if return_overlay:
+            overlay = self._create_overlay(original_array, binary_mask_resized)
+            result['overlay'] = overlay
+        
+        return result
+    
+    def _create_overlay(self, original_image: np.ndarray, mask: np.ndarray, 
+                        color: Tuple[int, int, int] = (255, 0, 0), 
+                        alpha: float = 0.4) -> np.ndarray:
+        """
+        Create an overlay visualization of the mask on the original image.
+        
+        Args:
+            original_image: Original RGB image
+            mask: Binary mask
+            color: RGB color for the mask overlay
+            alpha: Transparency of the overlay (0-1)
+            
+        Returns:
+            Overlay image as numpy array
+        """
+        # Create colored mask
+        colored_mask = np.zeros_like(original_image)
+        colored_mask[mask > 0] = color
+        
+        # Blend with original image
+        overlay = cv2.addWeighted(original_image, 1 - alpha, colored_mask, alpha, 0)
+        
+        return overlay
